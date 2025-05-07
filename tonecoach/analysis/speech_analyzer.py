@@ -10,6 +10,45 @@ import torch
 from transformers import pipeline, AutoProcessor, AutoModelForSpeechSeq2Seq
 import streamlit as st
 from pydub import AudioSegment
+import scipy  # Add this import to ensure compatibility
+
+# Add this compatibility function at the top of the file
+def get_hann_window(length):
+    """
+    Compatibility function for different scipy versions
+    """
+    try:
+        # Try newer scipy versions
+        return scipy.signal.windows.hann(length)
+    except AttributeError:
+        try:
+            # Try older scipy versions
+            return scipy.signal.hann(length)
+        except AttributeError:
+            # Fallback implementation if neither is available
+            import numpy as np
+            return 0.5 * (1 - np.cos(2 * np.pi * np.arange(length) / (length - 1)))
+
+# Patch librosa's beat.py function
+original_beat_track = librosa.beat.beat_track
+
+def patched_beat_track(*args, **kwargs):
+    """
+    Patch for librosa's beat_track function to handle different scipy versions
+    """
+    try:
+        return original_beat_track(*args, **kwargs)
+    except AttributeError as e:
+        if "module 'scipy.signal' has no attribute 'hann'" in str(e):
+            # Monkey patch scipy.signal.hann temporarily
+            if not hasattr(scipy.signal, 'hann'):
+                scipy.signal.hann = get_hann_window
+            return original_beat_track(*args, **kwargs)
+        else:
+            raise
+
+# Apply the patch
+librosa.beat.beat_track = patched_beat_track
 
 class SpeechAnalyzer:
     # Class variables for cached models
@@ -184,7 +223,7 @@ class SpeechAnalyzer:
             }
             
         except Exception as e:
-            st.error(f"Error analyzing audio: {e}")
+            st.error(f"Error analyzing speech: {e}")
             os.unlink(temp_path)
             return None
     

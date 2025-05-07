@@ -87,52 +87,30 @@ def display_feedback(feedback):
 
 def display_audio_recorder():
     """
-    Display audio recorder widget
+    Display audio recorder widget using Streamlit's native audio_input
     
     Returns:
         Audio bytes if recorded, otherwise None
     """
     st.write("### Record Your Speech")
     
-    # Use the file uploader as a more reliable alternative
-    # This is a workaround since audio_recorder may not be available in all Streamlit versions
+    # Use Streamlit's native audio_input component
+    audio_bytes = st.audio_input("Click to record your speech", key="speech_recorder")
+    
+    if audio_bytes:
+        # Display the recorded audio
+        st.audio(audio_bytes)
+        return audio_bytes
+    
+    # Alternative: Keep file upload option for users who prefer to upload pre-recorded files
+    st.write("Or upload a pre-recorded file:")
     uploaded_file = st.file_uploader("Upload an audio recording", type=["wav", "mp3", "ogg"])
     
     if uploaded_file is not None:
         # Read the file
         audio_bytes = uploaded_file.read()
-        
         # Display the audio
         st.audio(audio_bytes)
-        
-        return audio_bytes
-    
-    # Add a checkbox to simulate recording (for development purposes)
-    use_sample = st.checkbox("Use sample recording")
-    if use_sample:
-        # Return a small sample audio file for testing
-        import io
-        import numpy as np
-        from scipy.io.wavfile import write
-        
-        # Generate a simple sine wave
-        sample_rate = 44100
-        duration = 3  # seconds
-        t = np.linspace(0, duration, int(sample_rate * duration), False)
-        tone = np.sin(2 * np.pi * 440 * t)  # 440 Hz
-        
-        # Convert to 16-bit PCM
-        tone = (tone * 32767).astype(np.int16)
-        
-        # Create a BytesIO object
-        buffer = io.BytesIO()
-        write(buffer, sample_rate, tone)
-        buffer.seek(0)
-        
-        # Display the audio
-        audio_bytes = buffer.read()
-        st.audio(audio_bytes)
-        
         return audio_bytes
     
     return None

@@ -319,7 +319,8 @@ def display_practice_page(analyzer, feedback_generator):
         if st.button("Analyze My Speech"):
             with st.spinner("Analyzing your speech..."):
                 # Create a file-like object from audio bytes
-                audio_file = BytesIO(audio_bytes)
+                audio_file = BytesIO(audio_bytes.getvalue())
+                # In a real implementation, we would save the audio file to disk
                 
                 # Analyze speech
                 analysis_results = analyzer.analyze(audio_file)
@@ -622,7 +623,7 @@ def display_voice_enrollment_page(analyzer):
         st.audio(audio_bytes)
         
         # In a real implementation, we would validate the length here
-        audio_file = BytesIO(audio_bytes)
+        audio_file = (audio_bytes)
         
         if st.button("Create Voice Model"):
             with st.spinner("Creating your voice model... This may take a minute."):

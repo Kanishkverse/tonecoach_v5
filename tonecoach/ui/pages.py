@@ -319,60 +319,71 @@ def display_practice_page(analyzer, feedback_generator):
         if st.button("Analyze My Speech"):
             with st.spinner("Analyzing your speech..."):
                 # Create a file-like object from audio bytes
-                audio_file = BytesIO(audio_bytes.getvalue())
-                # In a real implementation, we would save the audio file to disk
-                
-                # Analyze speech
-                analysis_results = analyzer.analyze(audio_file)
-                
-                if analysis_results:
-                    # Generate feedback
-                    target_text = exercise_text if exercise_text else None
-                    feedback = feedback_generator.generate(
-                        analysis_results, target_text
-                    )
-                    
-                    # Save recording to filesystem
-                    filename = save_audio_file(st.session_state.user_id, audio_file)
-                    
-                    # Store results in database
-                    recording_id = save_recording(
-                        st.session_state.user_id, filename, analysis_results, feedback
-                    )
-                    
-                    if recording_id:
-                        # Display analysis results
-                        st.subheader("Analysis Results")
-                        display_stats_cards(analysis_results)
-                        
-                        # Display charts
-                        tab1, tab2, tab3 = st.tabs(["Pitch", "Energy", "Emotions"])
-                        
-                        with tab1:
-                            pitch_chart = create_pitch_chart(
-                                analysis_results['pitch'], 
-                                analysis_results['pitch_timestamps']
-                            )
-                            st.plotly_chart(pitch_chart, use_container_width=True)
-                        
-                        with tab2:
-                            energy_chart = create_energy_chart(
-                                analysis_results['energy'], 
-                                analysis_results['energy_timestamps']
-                            )
-                            st.plotly_chart(energy_chart, use_container_width=True)
-                        
-                        with tab3:
-                            emotion_chart = create_emotion_chart(analysis_results['emotions'])
-                            st.plotly_chart(emotion_chart, use_container_width=True)
-                        
-                        # Display feedback
-                        st.subheader("Feedback")
-                        display_feedback(feedback)
+                try:
+                    # Check if audio_bytes is a file-like object (from st.audio_input)
+                    if hasattr(audio_bytes, 'getvalue'):
+                        # It's already a file-like object, use it directly
+                        audio_file = audio_bytes
                     else:
-                        st.error("Error storing analysis results")
-                else:
-                    st.error("Error analyzing speech")
+                        # It's raw bytes, wrap it in BytesIO
+                        audio_file = BytesIO(audio_bytes)
+                    
+                    # Analyze speech
+                    analysis_results = analyzer.analyze(audio_file)
+                    
+                    if analysis_results:
+                        # Generate feedback
+                        target_text = exercise_text if exercise_text else None
+                        feedback = feedback_generator.generate(
+                            analysis_results, target_text
+                        )
+                        
+                        # Save recording to filesystem
+                        filename = save_audio_file(st.session_state.user_id, audio_file)
+                        
+                        # Store results in database
+                        recording_id = save_recording(
+                            st.session_state.user_id, filename, analysis_results, feedback
+                        )
+                        
+                        if recording_id:
+                            # Display analysis results
+                            st.subheader("Analysis Results")
+                            display_stats_cards(analysis_results)
+                            
+                            # Display charts
+                            tab1, tab2, tab3 = st.tabs(["Pitch", "Energy", "Emotions"])
+                            
+                            with tab1:
+                                pitch_chart = create_pitch_chart(
+                                    analysis_results['pitch'], 
+                                    analysis_results['pitch_timestamps']
+                                )
+                                st.plotly_chart(pitch_chart, use_container_width=True)
+                            
+                            with tab2:
+                                energy_chart = create_energy_chart(
+                                    analysis_results['energy'], 
+                                    analysis_results['energy_timestamps']
+                                )
+                                st.plotly_chart(energy_chart, use_container_width=True)
+                            
+                            with tab3:
+                                emotion_chart = create_emotion_chart(analysis_results['emotions'])
+                                st.plotly_chart(emotion_chart, use_container_width=True)
+                            
+                            # Display feedback
+                            st.subheader("Feedback")
+                            display_feedback(feedback)
+                        else:
+                            st.error("Error storing analysis results")
+                except Exception as e:
+                    st.error(f"Error analyzing speech: {e}")
+                finally:
+                    # Clean up the audio file if needed
+                    if hasattr(audio_file, 'close'):
+                        audio_file.close()  
+
     else:
         st.info("Record your speech to get feedback")
 
@@ -488,11 +499,19 @@ def display_exercise_detail_page(analyzer, feedback_generator):
         
         if st.button("Analyze My Speech"):
             with st.spinner("Analyzing your speech..."):
+                try:
+                    if hasattr(audio_bytes, 'getvalue'):
+                        audio_file = audio_bytes
+                    else:   
+                        # It's raw bytes, wrap it in BytesIO
+                        audio_file = BytesIO(audio_bytes)
+                except Exception as e:
+                    st.error(f"An error occurred while processing the audio: {e}")
+
                 # Create a file-like object from audio bytes
-                audio_file = BytesIO(audio_bytes)
-                
-                # Analyze speech
-                analysis_results = analyzer.analyze(audio_file)
+               
+                    # Analyze speech
+                    analysis_results = analyzer.analyze(audio_file)
                 
                 if analysis_results:
                     # Generate feedback

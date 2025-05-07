@@ -845,13 +845,14 @@ def display_settings_page():
     st.subheader("Profile")
     
     with st.form("profile_form"):
-        st.write(f"**Username:** {user.username}")
-        email = st.text_input("Email", user.email)
+        # Fix: Access as dictionary items instead of attributes
+        st.write(f"**Username:** {user['username']}")
+        email = st.text_input("Email", user['email'])
         
         update_profile = st.form_submit_button("Update Profile")
         
         if update_profile:
-            if email and email != user.email:
+            if email and email != user['email']:
                 if update_user(st.session_state.user_id, email=email):
                     st.success("Profile updated successfully!")
                 else:
@@ -874,7 +875,7 @@ def display_settings_page():
                 st.error("New passwords do not match")
             else:
                 # Verify current password
-                if login_user(user.username, current_password):
+                if login_user(user['username'], current_password):
                     if update_user(st.session_state.user_id, password_hash=new_password):
                         st.success("Password updated successfully!")
                     else:
@@ -885,7 +886,7 @@ def display_settings_page():
     # Voice model section
     st.subheader("Voice Model")
     
-    if user.has_voice_model:
+    if user['has_voice_model']:
         st.success("You have a voice model")
         if st.button("Reset Voice Model"):
             update_voice_model_status(st.session_state.user_id, False)

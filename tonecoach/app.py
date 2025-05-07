@@ -1,214 +1,182 @@
 import streamlit as st
-import os
+
+# First Streamlit command must be set_page_config
+st.set_page_config(
+    page_title="ToneCoach - AI Speech Coaching",
+    page_icon="🎤",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+import time
 from pathlib import Path
 
-# Import modules
-from database.db_utils import init_db
+# Import UI components
 from ui.pages import (
     display_login_page,
     display_register_page,
     display_dashboard_page,
     display_practice_page,
     display_exercises_page,
+    display_exercise_detail_page,
     display_recordings_page,
     display_recording_detail_page,
     display_voice_enrollment_page,
-    display_settings_page,
-    display_exercise_detail_page
+    display_settings_page
 )
+
+# Import admin component
+from admin.benchmark_tool import display_admin_benchmark_tool
+
+# Import analysis components
 from analysis.speech_analyzer import SpeechAnalyzer
 from analysis.feedback_generator import FeedbackGenerator
-from utils.auth import check_auth
 
-# Setup folders
-UPLOAD_FOLDER = Path("uploads")
-MODEL_FOLDER = Path("models")
-for folder in [UPLOAD_FOLDER, MODEL_FOLDER]:
-    folder.mkdir(exist_ok=True)
+# Initialize session state
+if 'page' not in st.session_state:
+    st.session_state.page = 'login'
 
-# Initialize database
-init_db()
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
 
-# Main app
-def main():
-    # Initialize session state
-    if 'user_id' not in st.session_state:
-        st.session_state.user_id = None
-    
-    if 'page' not in st.session_state:
-        st.session_state.page = 'login'
-    
-    # Initialize analyzers if not already done
-    if 'analyzer' not in st.session_state:
-        st.session_state.analyzer = SpeechAnalyzer()
-    
-    if 'feedback_generator' not in st.session_state:
-        st.session_state.feedback_generator = FeedbackGenerator()
-    
-    # Custom CSS
-    st.markdown("""
-    <style>
-    /* Primary Colors */
-    :root {
-        --primary: #4F46E5;
-        --primary-dark: #4338CA;
-        --secondary: #10B981;
-        --accent: #F59E0B;
-        --background: #F9FAFB;
-        --surface: #FFFFFF;
-        --text: #1F2937;
-        --text-light: #6B7280;
+# Initialize analyzer and feedback generator
+@st.cache_resource
+def load_analyzer():
+    return SpeechAnalyzer()
+
+@st.cache_resource
+def load_feedback_generator():
+    return FeedbackGenerator()
+
+if 'analyzer' not in st.session_state:
+    st.session_state.analyzer = load_analyzer()
+
+if 'feedback_generator' not in st.session_state:
+    st.session_state.feedback_generator = load_feedback_generator()
+
+# Add custom CSS
+st.markdown("""
+<style>
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
     }
     
-    /* General styling */
-    .main {
-        background-color: var(--background);
-        color: var(--text);
-    }
-    
-    h1, h2, h3 {
-        color: var(--text);
-        font-weight: 600;
-    }
-    
-    /* Cards */
-    .card {
-        background-color: white;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin-bottom: 20px;
-    }
-    
-    /* Stats */
-    .metric-container {
-        display: flex;
-        justify-content: space-between;
+    .stButton button {
+        width: 100%;
     }
     
     .metric-card {
-        background-color: white;
-        border-radius: 10px;
-        padding: 15px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        text-align: center;
-        width: 23%;
-    }
-    
-    .metric-value {
-        font-size: 24px;
-        font-weight: 700;
-        color: var(--primary);
-    }
-    
-    .metric-label {
-        font-size: 14px;
-        color: var(--text-light);
-    }
-    
-    /* Custom button styling */
-    .stButton > button {
-        background-color: var(--primary);
-        color: white;
-        border: none;
-        padding: 10px 20px;
+        border: 1px solid #ddd;
         border-radius: 5px;
-        font-weight: 500;
+        padding: 1rem;
+        text-align: center;
     }
     
-    .stButton > button:hover {
-        background-color: var(--primary-dark);
+    .comparison-chart {
+        margin-top: 1rem;
+        margin-bottom: 1rem;
     }
-    
-    /* Feedback sections */
-    .feedback-section {
-        margin-top: 20px;
-        margin-bottom: 20px;
-    }
-    
-    /* Auth forms */
-    .auth-form {
-        max-width: 400px;
-        margin: 0 auto;
-    }
-    
-    /* Progress positive/negative */
-    .positive {
-        color: var(--secondary);
-    }
-    
-    .negative {
-        color: #EF4444;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # App title and sidebar
-    st.sidebar.title("ToneCoach")
-    
-    # Navigation
-    if check_auth():
-        # User is authenticated
-        nav_options = [
-            "Dashboard",
-            "Practice",
-            "Exercises",
-            "My Recordings",
-            "Voice Enrollment",
-            "Settings",
-            "Logout"
-        ]
+</style>
+""", unsafe_allow_html=True)
+
+# Sidebar navigation
+def sidebar():
+    if st.session_state.user_id:
+        st.sidebar.title("Navigation")
         
-        nav_selection = st.sidebar.radio("Navigation", nav_options)
-        handle_navigation(nav_selection)
-    else:
-        # User is not authenticated
-        auth_option = st.sidebar.radio("Authentication", ["Login", "Register"])
+        if st.sidebar.button("Dashboard"):
+            st.session_state.page = 'dashboard'
+            st.rerun()
         
-        if auth_option == "Login":
+        if st.sidebar.button("Practice"):
+            st.session_state.page = 'practice'
+            st.rerun()
+        
+        if st.sidebar.button("Exercises"):
+            st.session_state.page = 'exercises'
+            st.rerun()
+        
+        if st.sidebar.button("My Recordings"):
+            st.session_state.page = 'recordings'
+            st.rerun()
+        
+        if st.sidebar.button("Voice Enrollment"):
+            st.session_state.page = 'voice_enrollment'
+            st.rerun()
+        
+        if st.sidebar.button("Settings"):
+            st.session_state.page = 'settings'
+            st.rerun()
+        
+        # Admin access (in a real app, this would be restricted to admin users)
+        st.sidebar.markdown("---")
+        st.sidebar.title("Admin")
+        
+        if st.sidebar.button("Benchmark Management"):
+            st.session_state.page = 'admin_benchmark'
+            st.rerun()
+        
+        st.sidebar.markdown("---")
+        if st.sidebar.button("Logout"):
+            st.session_state.user_id = None
             st.session_state.page = 'login'
-        else:
-            st.session_state.page = 'register'
+            st.rerun()
+
+# Main function
+def main():
+    # Check if user is logged in
+    if not st.session_state.user_id and st.session_state.page not in ['login', 'register']:
+        st.session_state.page = 'login'
     
-    # Page content
+    # Display sidebar if user is logged in
+    if st.session_state.user_id:
+        sidebar()
+    
+    # Display the appropriate page
     if st.session_state.page == 'login':
         display_login_page()
+        
+        # Link to register page
+        if st.button("Create an Account"):
+            st.session_state.page = 'register'
+            st.rerun()
+    
     elif st.session_state.page == 'register':
         display_register_page()
+        
+        # Link to login page
+        if st.button("Already have an account? Log in"):
+            st.session_state.page = 'login'
+            st.rerun()
+    
     elif st.session_state.page == 'dashboard':
         display_dashboard_page()
+    
     elif st.session_state.page == 'practice':
         display_practice_page(st.session_state.analyzer, st.session_state.feedback_generator)
+    
     elif st.session_state.page == 'exercises':
         display_exercises_page()
-    elif st.session_state.page == 'recordings':
-        display_recordings_page()
-    elif st.session_state.page == 'recording_detail':
-        display_recording_detail_page()
-    elif st.session_state.page == 'voice_enrollment':
-        display_voice_enrollment_page(st.session_state.analyzer)
-    elif st.session_state.page == 'settings':
-        display_settings_page()
+    
     elif st.session_state.page == 'exercise_detail':
         display_exercise_detail_page(st.session_state.analyzer, st.session_state.feedback_generator)
+    
+    elif st.session_state.page == 'recordings':
+        display_recordings_page()
+    
+    elif st.session_state.page == 'recording_detail':
+        display_recording_detail_page()
+    
+    elif st.session_state.page == 'voice_enrollment':
+        display_voice_enrollment_page(st.session_state.analyzer)
+    
+    elif st.session_state.page == 'settings':
+        display_settings_page()
+    
+    elif st.session_state.page == 'admin_benchmark':
+        display_admin_benchmark_tool()
 
-def handle_navigation(selection):
-    if selection == "Dashboard":
-        st.session_state.page = 'dashboard'
-    elif selection == "Practice":
-        st.session_state.page = 'practice'
-    elif selection == "Exercises":
-        st.session_state.page = 'exercises'
-    elif selection == "My Recordings":
-        st.session_state.page = 'recordings'
-    elif selection == "Voice Enrollment":
-        st.session_state.page = 'voice_enrollment'
-    elif selection == "Settings":
-        st.session_state.page = 'settings'
-    elif selection == "Logout":
-        st.session_state.user_id = None
-        st.session_state.page = 'login'
-        st.rerun()
-
+# Run the app
 if __name__ == "__main__":
     main()

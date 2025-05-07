@@ -1,4 +1,5 @@
 import streamlit as st
+from io import BytesIO
 
 def display_stats_cards(stats):
     """
@@ -56,7 +57,7 @@ def display_feedback(feedback):
     
     # Display specific feedback
     st.subheader("Specific Feedback")
-    for item in feedback['specific_feedback']:
+    for item in feedback.get('specific_feedback', []):
         st.write(f"• {item}")
     
     # Create two columns for strengths and suggestions
@@ -64,30 +65,109 @@ def display_feedback(feedback):
     
     with col1:
         st.subheader("Your Strengths")
-        for strength in feedback['strengths']:
+        for strength in feedback.get('strengths', []):
             st.success(f"✓ {strength}")
     
     with col2:
         st.subheader("Improvement Suggestions")
-        for suggestion in feedback['improvement_suggestions']:
+        for suggestion in feedback.get('improvement_suggestions', []):
             st.warning(f"→ {suggestion}")
     
     # Display content accuracy if available
     if feedback.get('content_accuracy'):
         st.subheader("Content Accuracy")
         acc = feedback['content_accuracy']
-        st.info(f"Accuracy Score: {acc['accuracy_score']}%")
-        st.write(acc['feedback'])
+        st.info(f"Accuracy Score: {acc.get('accuracy_score', 0)}%")
+        st.write(acc.get('feedback', ''))
         
-        if acc['missing_words']:
+        if acc.get('missing_words'):
             st.write("Missing words: " + ", ".join(acc['missing_words']))
         
-        if acc['added_words']:
+        if acc.get('added_words'):
+            st.write("Added words: " + ", ".join(acc['added_words']))
+
+def display_comparison_feedback(feedback):
+    """
+    Display comparative feedback between user and benchmark recordings
+    
+    Args:
+        feedback: Dictionary containing comparative feedback components
+    """
+    if not feedback:
+        st.warning("No feedback available")
+        return
+    
+    st.subheader("Overall Assessment")
+    st.info(feedback.get('overall_assessment', 'No overall assessment available'))
+    
+    # Display comparison stats if available
+    if feedback.get('comparison'):
+        comparison = feedback['comparison']
+        
+        st.subheader("Comparison with Benchmark")
+        for item in comparison.get('general', []):
+            st.write(f"• {item}")
+        
+        # Create three columns for strengths, matches, and areas to improve
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.subheader("Your Strengths")
+            for strength in comparison.get('strengths', []):
+                st.success(f"✓ {strength}")
+        
+        with col2:
+            st.subheader("Matching Qualities")
+            for match in comparison.get('matches', []):
+                st.info(f"≈ {match}")
+        
+        with col3:
+            st.subheader("Areas to Improve")
+            for improvement in comparison.get('improvements', []):
+                st.warning(f"→ {improvement}")
+    
+    # Display specific feedback
+    if feedback.get('specific_feedback'):
+        st.subheader("Specific Feedback")
+        for item in feedback['specific_feedback']:
+            st.write(f"• {item}")
+    
+    # Display content accuracy comparison if available
+    if feedback.get('content_accuracy'):
+        st.subheader("Content Accuracy")
+        acc = feedback['content_accuracy']
+        
+        # Show benchmark accuracy if available
+        if acc.get('benchmark_accuracy'):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric(
+                    "Your Accuracy Score",
+                    f"{acc.get('accuracy_score', 0)}%",
+                    delta=f"{acc.get('accuracy_score', 0) - acc.get('benchmark_accuracy', 0)}%"
+                )
+            
+            with col2:
+                st.metric(
+                    "Benchmark Accuracy Score",
+                    f"{acc.get('benchmark_accuracy', 0)}%"
+                )
+        else:
+            # Show just user accuracy if benchmark is not available
+            st.info(f"Accuracy Score: {acc.get('accuracy_score', 0)}%")
+        
+        st.write(acc.get('feedback', ''))
+        
+        if acc.get('missing_words'):
+            st.write("Missing words: " + ", ".join(acc['missing_words']))
+        
+        if acc.get('added_words'):
             st.write("Added words: " + ", ".join(acc['added_words']))
 
 def display_audio_recorder():
     """
-    Display audio recorder widget using Streamlit's native audio_input
+    Display audio recorder widget
     
     Returns:
         Audio bytes if recorded, otherwise None
@@ -108,7 +188,7 @@ def display_audio_recorder():
     
     if uploaded_file is not None:
         # Read the file
-        audio_bytes = uploaded_file.read()
+        audio_bytes = uploaded_file
         # Display the audio
         st.audio(audio_bytes)
         return audio_bytes

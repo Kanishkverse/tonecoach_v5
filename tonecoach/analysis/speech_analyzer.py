@@ -4,51 +4,13 @@ import librosa.display
 import soundfile as sf
 import os
 import time
+from pathlib import Path
 from io import BytesIO
 import tempfile
 import torch
 from transformers import pipeline, AutoProcessor, AutoModelForSpeechSeq2Seq
 import streamlit as st
 from pydub import AudioSegment
-import scipy  # Add this import to ensure compatibility
-
-# Add this compatibility function at the top of the file
-def get_hann_window(length):
-    """
-    Compatibility function for different scipy versions
-    """
-    try:
-        # Try newer scipy versions
-        return scipy.signal.windows.hann(length)
-    except AttributeError:
-        try:
-            # Try older scipy versions
-            return scipy.signal.hann(length)
-        except AttributeError:
-            # Fallback implementation if neither is available
-            import numpy as np
-            return 0.5 * (1 - np.cos(2 * np.pi * np.arange(length) / (length - 1)))
-
-# Patch librosa's beat.py function
-original_beat_track = librosa.beat.beat_track
-
-def patched_beat_track(*args, **kwargs):
-    """
-    Patch for librosa's beat_track function to handle different scipy versions
-    """
-    try:
-        return original_beat_track(*args, **kwargs)
-    except AttributeError as e:
-        if "module 'scipy.signal' has no attribute 'hann'" in str(e):
-            # Monkey patch scipy.signal.hann temporarily
-            if not hasattr(scipy.signal, 'hann'):
-                scipy.signal.hann = get_hann_window
-            return original_beat_track(*args, **kwargs)
-        else:
-            raise
-
-# Apply the patch
-librosa.beat.beat_track = patched_beat_track
 
 class SpeechAnalyzer:
     # Class variables for cached models
@@ -116,7 +78,23 @@ class SpeechAnalyzer:
         """
         # Create a temporary file to store the audio
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-            temp_file.write(audio_file.getvalue())
+            # Handle different types of audio_file inputs
+            if hasattr(audio_file, 'getvalue'):
+                # It's a file-like object with getvalue method (like from st.audio_input)
+                temp_file.write(audio_file.getvalue())
+            elif hasattr(audio_file, 'read'):
+                # It's a file-like object with read method
+                temp_file.write(audio_file.read())
+            elif isinstance(audio_file, bytes):
+                # It's raw bytes
+                temp_file.write(audio_file)
+            elif isinstance(audio_file, str) or isinstance(audio_file, Path):
+                # It's a file path
+                with open(audio_file, 'rb') as f:
+                    temp_file.write(f.read())
+            else:
+                raise ValueError("Unsupported audio file type")
+            
             temp_path = temp_file.name
         
         try:
@@ -155,7 +133,19 @@ class SpeechAnalyzer:
             
             # Calculate speech rate
             onset_env = librosa.onset.onset_strength(y=audio, sr=sr)
-            tempo, _ = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+            
+            # Patch for scipy compatibility issues
+            try:
+                tempo, _ = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+            except AttributeError as e:
+                if "module 'scipy.signal' has no attribute 'hann'" in str(e):
+                    # Fix for newer SciPy versions where hann is in windows submodule
+                    import scipy
+                    if not hasattr(scipy.signal, 'hann') and hasattr(scipy.signal.windows, 'hann'):
+                        scipy.signal.hann = scipy.signal.windows.hann
+                    tempo, _ = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+                else:
+                    raise
             
             # Extract syllable information for speech rate
             mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)
@@ -223,8 +213,11 @@ class SpeechAnalyzer:
             }
             
         except Exception as e:
-            st.error(f"Error analyzing speech: {e}")
-            os.unlink(temp_path)
+            st.error(f"Error analyzing audio: {e}")
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
             return None
     
     def transcribe_audio(self, audio_path):

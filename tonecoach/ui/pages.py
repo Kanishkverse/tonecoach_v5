@@ -13,24 +13,29 @@ from database.db_utils import (
     get_all_exercises,
     get_exercise,
     save_recording,
-    update_voice_model_status
+    update_voice_model_status,
+    get_user_by_id  # Added missing import
 )
 from utils.auth import login_user, register_user, update_user
 from ui.charts import (
     create_pitch_chart,
     create_energy_chart,
     create_emotion_chart,
-    create_progress_chart
+    create_progress_chart,
+    create_combined_pitch_chart,
+    create_combined_energy_chart
 )
 from ui.components import (
     display_stats_cards,
     display_feedback,
+    display_comparison_feedback,
     display_audio_recorder
 )
 from utils.audio import save_audio_file
 
 # Path to upload directory
 UPLOAD_FOLDER = Path("uploads")
+BENCHMARK_FOLDER = Path("benchmarks")
 
 def display_login_page():
     """Display the login page"""
@@ -280,19 +285,28 @@ def display_practice_page(analyzer, feedback_generator):
         
         exercise_id = None
         exercise_text = ""
+        exercise_obj = None
         
         if selected_exercise:
             exercise_id = int(selected_exercise.split(":")[0])
-            exercise = get_exercise(exercise_id)
+            exercise_obj = get_exercise(exercise_id)
             
-            if exercise:
-                st.write(f"**Description:** {exercise['description']}")
-                st.write(f"**Category:** {exercise['category']}")
-                st.write(f"**Target Emotion:** {exercise['target_emotion']}")
+            if exercise_obj:
+                st.write(f"**Description:** {exercise_obj['description']}")
+                st.write(f"**Category:** {exercise_obj['category']}")
+                st.write(f"**Target Emotion:** {exercise_obj['target_emotion']}")
                 
                 st.markdown("### Text to Read:")
-                st.info(exercise['text_content'])
-                exercise_text = exercise['text_content']
+                st.info(exercise_obj['text_content'])
+                exercise_text = exercise_obj['text_content']
+                
+                # Display benchmark audio if available
+                if exercise_obj['benchmark_audio_path']:
+                    benchmark_path = Path(exercise_obj['benchmark_audio_path'])
+                    if benchmark_path.exists():
+                        st.subheader("Listen to Benchmark Recording")
+                        st.audio(str(benchmark_path))
+                        st.info("Listen to this recording as a reference for your practice.")
     
     with tab2:
         custom_text = st.text_area(
@@ -304,6 +318,7 @@ def display_practice_page(analyzer, feedback_generator):
         if custom_text:
             exercise_id = None
             exercise_text = custom_text
+            exercise_obj = None
     
     # Audio recorder
     st.subheader("Record Your Speech")
@@ -318,9 +333,8 @@ def display_practice_page(analyzer, feedback_generator):
         
         if st.button("Analyze My Speech"):
             with st.spinner("Analyzing your speech..."):
-                # Create a file-like object from audio bytes
                 try:
-                    # Check if audio_bytes is a file-like object (from st.audio_input)
+                    # Handle the audio_bytes based on its type
                     if hasattr(audio_bytes, 'getvalue'):
                         # It's already a file-like object, use it directly
                         audio_file = audio_bytes
@@ -332,11 +346,37 @@ def display_practice_page(analyzer, feedback_generator):
                     analysis_results = analyzer.analyze(audio_file)
                     
                     if analysis_results:
+                        # Check if benchmark audio is available
+                        benchmark_analysis = None
+                        if exercise_obj and exercise_obj['benchmark_audio_path']:
+                            try:
+                                benchmark_path = Path(exercise_obj['benchmark_audio_path'])
+                                if benchmark_path.exists():
+                                    # Analyze benchmark audio
+                                    benchmark_analysis = analyzer.analyze(benchmark_path)
+                            except Exception as e:
+                                st.warning(f"Could not analyze benchmark audio: {e}")
+                        
                         # Generate feedback
                         target_text = exercise_text if exercise_text else None
-                        feedback = feedback_generator.generate(
-                            analysis_results, target_text
-                        )
+                        
+                        if benchmark_analysis:
+                            # Generate comparative feedback
+                            feedback = feedback_generator.generate_comparative(
+                                analysis_results, 
+                                benchmark_analysis, 
+                                target_text
+                            )
+                        else:
+                            # Generate regular feedback
+                            feedback = feedback_generator.generate(
+                                analysis_results, 
+                                target_text
+                            )
+                        
+                        # Reset file pointer to beginning for saving
+                        if hasattr(audio_file, 'seek'):
+                            audio_file.seek(0)
                         
                         # Save recording to filesystem
                         filename = save_audio_file(st.session_state.user_id, audio_file)
@@ -351,39 +391,71 @@ def display_practice_page(analyzer, feedback_generator):
                             st.subheader("Analysis Results")
                             display_stats_cards(analysis_results)
                             
+                            if benchmark_analysis:
+                                # Display comparison
+                                st.subheader("Comparison with Benchmark")
+                                display_comparison_charts(analysis_results, benchmark_analysis)
+                            
                             # Display charts
-                            tab1, tab2, tab3 = st.tabs(["Pitch", "Energy", "Emotions"])
-                            
-                            with tab1:
-                                pitch_chart = create_pitch_chart(
-                                    analysis_results['pitch'], 
-                                    analysis_results['pitch_timestamps']
-                                )
-                                st.plotly_chart(pitch_chart, use_container_width=True)
-                            
-                            with tab2:
-                                energy_chart = create_energy_chart(
-                                    analysis_results['energy'], 
-                                    analysis_results['energy_timestamps']
-                                )
-                                st.plotly_chart(energy_chart, use_container_width=True)
-                            
-                            with tab3:
-                                emotion_chart = create_emotion_chart(analysis_results['emotions'])
-                                st.plotly_chart(emotion_chart, use_container_width=True)
-                            
-                            # Display feedback
-                            st.subheader("Feedback")
-                            display_feedback(feedback)
+                            if benchmark_analysis:
+                                tab1, tab2, tab3 = st.tabs(["Pitch Comparison", "Energy Comparison", "Emotions"])
+                                
+                                with tab1:
+                                    pitch_chart = create_combined_pitch_chart(
+                                        analysis_results['pitch'], 
+                                        analysis_results['pitch_timestamps'],
+                                        benchmark_analysis['pitch'],
+                                        benchmark_analysis['pitch_timestamps']
+                                    )
+                                    st.plotly_chart(pitch_chart, use_container_width=True)
+                                
+                                with tab2:
+                                    energy_chart = create_combined_energy_chart(
+                                        analysis_results['energy'], 
+                                        analysis_results['energy_timestamps'],
+                                        benchmark_analysis['energy'],
+                                        benchmark_analysis['energy_timestamps']
+                                    )
+                                    st.plotly_chart(energy_chart, use_container_width=True)
+                                
+                                with tab3:
+                                    emotion_chart = create_emotion_chart(analysis_results['emotions'])
+                                    st.plotly_chart(emotion_chart, use_container_width=True)
+                                
+                                # Display comparative feedback
+                                st.subheader("Feedback")
+                                display_comparison_feedback(feedback)
+                            else:
+                                # Display standard charts (non-comparative)
+                                tab1, tab2, tab3 = st.tabs(["Pitch", "Energy", "Emotions"])
+                                
+                                with tab1:
+                                    pitch_chart = create_pitch_chart(
+                                        analysis_results['pitch'], 
+                                        analysis_results['pitch_timestamps']
+                                    )
+                                    st.plotly_chart(pitch_chart, use_container_width=True)
+                                
+                                with tab2:
+                                    energy_chart = create_energy_chart(
+                                        analysis_results['energy'], 
+                                        analysis_results['energy_timestamps']
+                                    )
+                                    st.plotly_chart(energy_chart, use_container_width=True)
+                                
+                                with tab3:
+                                    emotion_chart = create_emotion_chart(analysis_results['emotions'])
+                                    st.plotly_chart(emotion_chart, use_container_width=True)
+                                
+                                # Display standard feedback
+                                st.subheader("Feedback")
+                                display_feedback(feedback)
                         else:
                             st.error("Error storing analysis results")
+                    else:
+                        st.error("Error analyzing speech")
                 except Exception as e:
-                    st.error(f"Error analyzing speech: {e}")
-                finally:
-                    # Clean up the audio file if needed
-                    if hasattr(audio_file, 'close'):
-                        audio_file.close()  
-
+                    st.error(f"Error processing audio: {str(e)}")
     else:
         st.info("Record your speech to get feedback")
 
@@ -436,8 +508,12 @@ def display_exercises_page():
                 st.write(f"**Category:** {exercise['category']}")
                 st.write(f"**Target Emotion:** {exercise['target_emotion']}")
                 
+                # Display if benchmark is available
+                has_benchmark = exercise.get('benchmark_audio_path') is not None
+                if has_benchmark:
+                    st.success("✓ Benchmark audio available")
+                
                 # Preview of text
-               # Preview of text
                 text = exercise['text_content']
                 if len(text) > 100:
                     text = text[:100] + "..."
@@ -486,6 +562,30 @@ def display_exercise_detail_page(analyzer, feedback_generator):
     st.subheader("Text to Read:")
     st.info(exercise['text_content'])
     
+    # Display benchmark audio if available
+    if exercise['benchmark_audio_path']:
+        benchmark_path = Path(exercise['benchmark_audio_path'])
+        if benchmark_path.exists():
+            st.subheader("Listen to Benchmark Recording")
+            st.audio(str(benchmark_path))
+            st.info("Listen to this recording as a reference for your practice.")
+            
+            # Display benchmark metadata if available
+            if exercise['benchmark_metadata']:
+                try:
+                    metadata = json.loads(exercise['benchmark_metadata'])
+                    if metadata:
+                        with st.expander("Benchmark Details", expanded=False):
+                            for key, value in metadata.items():
+                                if key == 'transcription':
+                                    st.subheader("Benchmark Transcription")
+                                    st.write(value)
+                                elif key in ['expressiveness_score', 'pitch_variability', 
+                                            'energy_variability', 'speech_rate', 'primary_emotion']:
+                                    st.write(f"**{key.replace('_', ' ').title()}:** {value}")
+                except Exception as e:
+                    st.warning(f"Could not load benchmark metadata: {e}")
+    
     # Audio recorder
     st.subheader("Record Your Speech")
     audio_bytes = display_audio_recorder()
@@ -498,69 +598,130 @@ def display_exercise_detail_page(analyzer, feedback_generator):
         st.audio(audio_bytes)
         
         if st.button("Analyze My Speech"):
-            with st.spinner("Analyzing your speech..."):
+            with st.spinner("Analyzing your speech and comparing to benchmark..."):
                 try:
+                    # Handle the audio_bytes based on its type
                     if hasattr(audio_bytes, 'getvalue'):
+                        # It's already a file-like object, use it directly
                         audio_file = audio_bytes
-                    else:   
+                    else:
                         # It's raw bytes, wrap it in BytesIO
                         audio_file = BytesIO(audio_bytes)
-                except Exception as e:
-                    st.error(f"An error occurred while processing the audio: {e}")
-
-                # Create a file-like object from audio bytes
-               
+                    
                     # Analyze speech
                     analysis_results = analyzer.analyze(audio_file)
-                
-                if analysis_results:
-                    # Generate feedback
-                    target_text = exercise['text_content']
-                    feedback = feedback_generator.generate(
-                        analysis_results, target_text
-                    )
                     
-                    # Save recording to filesystem
-                    filename = save_audio_file(st.session_state.user_id, audio_file)
-                    
-                    # Store results in database
-                    recording_id = save_recording(
-                        st.session_state.user_id, filename, analysis_results, feedback
-                    )
-                    
-                    if recording_id:
-                        # Display analysis results
-                        st.subheader("Analysis Results")
-                        display_stats_cards(analysis_results)
+                    if analysis_results:
+                        # Check if benchmark audio is available
+                        benchmark_analysis = None
+                        if exercise['benchmark_audio_path']:
+                            try:
+                                benchmark_path = Path(exercise['benchmark_audio_path'])
+                                if benchmark_path.exists():
+                                    # Analyze benchmark audio
+                                    benchmark_analysis = analyzer.analyze(benchmark_path)
+                            except Exception as e:
+                                st.warning(f"Could not analyze benchmark audio: {e}")
                         
-                        # Display charts
-                        tab1, tab2, tab3 = st.tabs(["Pitch", "Energy", "Emotions"])
+                        # Generate feedback
+                        target_text = exercise['text_content']
                         
-                        with tab1:
-                            pitch_chart = create_pitch_chart(
-                                analysis_results['pitch'], 
-                                analysis_results['pitch_timestamps']
+                        if benchmark_analysis:
+                            # Generate comparative feedback
+                            feedback = feedback_generator.generate_comparative(
+                                analysis_results, 
+                                benchmark_analysis, 
+                                target_text
                             )
-                            st.plotly_chart(pitch_chart, use_container_width=True)
-                        
-                        with tab2:
-                            energy_chart = create_energy_chart(
-                                analysis_results['energy'], 
-                                analysis_results['energy_timestamps']
+                        else:
+                            # Generate regular feedback
+                            feedback = feedback_generator.generate(
+                                analysis_results, 
+                                target_text
                             )
-                            st.plotly_chart(energy_chart, use_container_width=True)
                         
-                        with tab3:
-                            emotion_chart = create_emotion_chart(analysis_results['emotions'])
-                            st.plotly_chart(emotion_chart, use_container_width=True)
+                        # Reset file pointer to beginning for saving
+                        if hasattr(audio_file, 'seek'):
+                            audio_file.seek(0)
                         
-                        # Display feedback
-                        st.subheader("Feedback")
-                        display_feedback(feedback)
+                        # Save recording to filesystem
+                        filename = save_audio_file(st.session_state.user_id, audio_file)
+                        
+                        # Store results in database
+                        recording_id = save_recording(
+                            st.session_state.user_id, filename, analysis_results, feedback
+                        )
+                        
+                        if recording_id:
+                            # Display analysis results
+                            st.subheader("Analysis Results")
+                            display_stats_cards(analysis_results)
+                            
+                            if benchmark_analysis:
+                                # Display comparison
+                                st.subheader("Comparison with Benchmark")
+                                display_comparison_charts(analysis_results, benchmark_analysis)
+                            
+                            # Display charts
+                            if benchmark_analysis:
+                                tab1, tab2, tab3 = st.tabs(["Pitch Comparison", "Energy Comparison", "Emotions"])
+                                
+                                with tab1:
+                                    pitch_chart = create_combined_pitch_chart(
+                                        analysis_results['pitch'], 
+                                        analysis_results['pitch_timestamps'],
+                                        benchmark_analysis['pitch'],
+                                        benchmark_analysis['pitch_timestamps']
+                                    )
+                                    st.plotly_chart(pitch_chart, use_container_width=True)
+                                
+                                with tab2:
+                                    energy_chart = create_combined_energy_chart(
+                                        analysis_results['energy'], 
+                                        analysis_results['energy_timestamps'],
+                                        benchmark_analysis['energy'],
+                                        benchmark_analysis['energy_timestamps']
+                                    )
+                                    st.plotly_chart(energy_chart, use_container_width=True)
+                                
+                                with tab3:
+                                    emotion_chart = create_emotion_chart(analysis_results['emotions'])
+                                    st.plotly_chart(emotion_chart, use_container_width=True)
+                                
+                                # Display comparative feedback
+                                st.subheader("Feedback")
+                                display_comparison_feedback(feedback)
+                            else:
+                                # Display standard charts (non-comparative)
+                                tab1, tab2, tab3 = st.tabs(["Pitch", "Energy", "Emotions"])
+                                
+                                with tab1:
+                                    pitch_chart = create_pitch_chart(
+                                        analysis_results['pitch'], 
+                                        analysis_results['pitch_timestamps']
+                                    )
+                                    st.plotly_chart(pitch_chart, use_container_width=True)
+                                
+                                with tab2:
+                                    energy_chart = create_energy_chart(
+                                        analysis_results['energy'], 
+                                        analysis_results['energy_timestamps']
+                                    )
+                                    st.plotly_chart(energy_chart, use_container_width=True)
+                                
+                                with tab3:
+                                    emotion_chart = create_emotion_chart(analysis_results['emotions'])
+                                    st.plotly_chart(emotion_chart, use_container_width=True)
+                                
+                                # Display standard feedback
+                                st.subheader("Feedback")
+                                display_feedback(feedback)
+                        else:
+                            st.error("Error storing analysis results")
                     else:
-                        st.error("Error storing analysis results")
-                else:
-                    st.error("Error analyzing speech")
+                        st.error("Error analyzing speech")
+                except Exception as e:
+                    st.error(f"Error processing audio: {str(e)}")
 
 def display_recordings_page():
     """Display the recordings page"""
@@ -642,22 +803,32 @@ def display_voice_enrollment_page(analyzer):
         st.audio(audio_bytes)
         
         # In a real implementation, we would validate the length here
-        audio_file = (audio_bytes)
-        
-        if st.button("Create Voice Model"):
-            with st.spinner("Creating your voice model... This may take a minute."):
-                # In a real implementation, this would create an actual voice model
-                # Here we'll analyze the audio to ensure it's valid
-                analysis_results = analyzer.analyze(audio_file)
-                
-                if analysis_results and analysis_results.get('duration', 0) >= 10:  # Minimum 10 seconds
-                    # Update user record to indicate they have a voice model
-                    update_voice_model_status(st.session_state.user_id, True)
+        try:
+            # Handle the audio_bytes based on its type
+            if hasattr(audio_bytes, 'getvalue'):
+                # It's already a file-like object, use it directly
+                audio_file = audio_bytes
+            else:
+                # It's raw bytes, wrap it in BytesIO
+                audio_file = BytesIO(audio_bytes)
+            
+            if st.button("Create Voice Model"):
+                with st.spinner("Creating your voice model... This may take a minute."):
+                    # In a real implementation, this would create an actual voice model
+                    # Here we'll analyze the audio to ensure it's valid
+                    analysis_results = analyzer.analyze(audio_file)
                     
-                    st.success("Voice model created successfully!")
-                    st.info("Your voice model will be used to provide enhanced feedback in future practice sessions.")
-                else:
-                    st.error("Error creating voice model. Please ensure your recording is at least 10 seconds long.")
+                    if analysis_results and analysis_results.get('duration', 0) >= 10:  # Minimum 10 seconds
+                        # Update user record to indicate they have a voice model
+                        update_voice_model_status(st.session_state.user_id, True)
+                        
+                        st.success("Voice model created successfully!")
+                        st.info("Your voice model will be used to provide enhanced feedback in future practice sessions.")
+                    else:
+                        st.error("Error creating voice model. Please ensure your recording is at least 10 seconds long.")
+        except Exception as e:
+            st.error(f"Error processing audio: {str(e)}")
+            return
 
 def display_settings_page():
     """Display the settings page"""
@@ -725,3 +896,75 @@ def display_settings_page():
         if st.button("Create Voice Model"):
             st.session_state.page = 'voice_enrollment'
             st.rerun()
+
+def display_comparison_charts(user_analysis, benchmark_analysis):
+    """
+    Display comparative charts between user recording and benchmark
+    
+    Args:
+        user_analysis: Dictionary containing user speech analysis
+        benchmark_analysis: Dictionary containing benchmark speech analysis
+    """
+    # Compare pitch variation
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric(
+            "Your Pitch Variation",
+            f"{user_analysis['pitch_variability']:.1f}",
+            delta=f"{user_analysis['pitch_variability'] - benchmark_analysis['pitch_variability']:.1f}"
+        )
+    
+    with col2:
+        st.metric(
+            "Benchmark Pitch Variation",
+            f"{benchmark_analysis['pitch_variability']:.1f}"
+        )
+    
+    # Compare energy variation
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric(
+            "Your Energy Variation",
+            f"{user_analysis['energy_variability']:.3f}",
+            delta=f"{user_analysis['energy_variability'] - benchmark_analysis['energy_variability']:.3f}"
+        )
+    
+    with col2:
+        st.metric(
+            "Benchmark Energy Variation",
+            f"{benchmark_analysis['energy_variability']:.3f}"
+        )
+    
+    # Compare speech rate
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric(
+            "Your Speech Rate",
+            f"{user_analysis['speech_rate']:.1f} syl/sec",
+            delta=f"{user_analysis['speech_rate'] - benchmark_analysis['speech_rate']:.1f}"
+        )
+    
+    with col2:
+        st.metric(
+            "Benchmark Speech Rate",
+            f"{benchmark_analysis['speech_rate']:.1f} syl/sec"
+        )
+    
+    # Compare expressiveness score
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric(
+            "Your Expressiveness",
+            f"{user_analysis['expressiveness_score']:.1f}%",
+            delta=f"{user_analysis['expressiveness_score'] - benchmark_analysis['expressiveness_score']:.1f}%"
+        )
+    
+    with col2:
+        st.metric(
+            "Benchmark Expressiveness",
+            f"{benchmark_analysis['expressiveness_score']:.1f}%"
+        )

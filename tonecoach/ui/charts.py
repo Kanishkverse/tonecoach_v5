@@ -1,14 +1,13 @@
 import plotly.graph_objects as go
 import plotly.express as px
-import pandas as pd
 import numpy as np
 
-def create_pitch_chart(pitch, timestamps):
+def create_pitch_chart(pitch_data, timestamps):
     """
-    Create a plot of pitch over time
+    Create a pitch over time chart
     
     Args:
-        pitch: List of pitch values
+        pitch_data: List of pitch values
         timestamps: List of timestamps
         
     Returns:
@@ -16,46 +15,30 @@ def create_pitch_chart(pitch, timestamps):
     """
     fig = go.Figure()
     
-    # Filter out empty values
-    if len(pitch) == 0:
-        return fig
-    
-    # Add pitch line
     fig.add_trace(go.Scatter(
         x=timestamps,
-        y=pitch,
+        y=pitch_data,
         mode='lines',
-        name='Pitch (Hz)',
-        line=dict(color='#4F46E5', width=2)
-    ))
-    
-    # Add a horizontal line for average pitch
-    avg_pitch = np.mean(pitch)
-    fig.add_trace(go.Scatter(
-        x=[min(timestamps), max(timestamps)],
-        y=[avg_pitch, avg_pitch],
-        mode='lines',
-        name='Average Pitch',
-        line=dict(color='rgba(255, 99, 132, 0.5)', width=2, dash='dash')
+        name='Pitch',
+        line=dict(color='blue', width=2)
     ))
     
     fig.update_layout(
         title='Pitch Variation Over Time',
         xaxis_title='Time (seconds)',
-        yaxis_title='Frequency (Hz)',
-        yaxis=dict(range=[80, 500]),
-        height=400,
-        template='plotly_white'
+        yaxis_title='Pitch (Hz)',
+        template='plotly_white',
+        hovermode='x unified'
     )
     
     return fig
 
-def create_energy_chart(energy, timestamps):
+def create_energy_chart(energy_data, timestamps):
     """
-    Create a plot of energy over time
+    Create an energy over time chart
     
     Args:
-        energy: List of energy values
+        energy_data: List of energy values
         timestamps: List of timestamps
         
     Returns:
@@ -63,140 +46,201 @@ def create_energy_chart(energy, timestamps):
     """
     fig = go.Figure()
     
-    # Filter out empty values
-    if len(energy) == 0:
-        return fig
-    
     fig.add_trace(go.Scatter(
         x=timestamps,
-        y=energy,
+        y=energy_data,
         mode='lines',
         name='Energy',
-        line=dict(color='#10B981', width=2),
-        fill='tozeroy',
-        fillcolor='rgba(16, 185, 129, 0.2)'
+        line=dict(color='orange', width=2),
+        fill='tozeroy'
     ))
     
     fig.update_layout(
         title='Energy Variation Over Time',
         xaxis_title='Time (seconds)',
-        yaxis_title='Energy (RMS)',
-        yaxis=dict(range=[0, max(energy) * 1.2]),
-        height=400,
-        template='plotly_white'
+        yaxis_title='Energy',
+        template='plotly_white',
+        hovermode='x unified'
     )
     
     return fig
 
-def create_emotion_chart(emotions):
+def create_emotion_chart(emotion_data):
     """
-    Create a bar chart of emotion scores
+    Create an emotion distribution chart
     
     Args:
-        emotions: Dictionary of emotion scores
+        emotion_data: Dictionary of emotions and their probabilities
         
     Returns:
         Plotly figure object
     """
-    # Convert to dataframe for plotting
-    if isinstance(emotions, dict):
-        emotions_df = pd.DataFrame({
-            'Emotion': list(emotions.keys()),
-            'Score': list(emotions.values())
-        })
+    if isinstance(emotion_data, dict):
+        emotions = list(emotion_data.keys())
+        probabilities = list(emotion_data.values())
     else:
-        return go.Figure()  # Return empty figure
+        # Handle the case where emotion_data is a counter or other format
+        emotions = []
+        probabilities = []
+        for emotion, count in emotion_data.items():
+            emotions.append(emotion.capitalize())
+            probabilities.append(count)
     
-    # Define colors for emotions
-    colors = {
-        'neutral': '#4F46E5',
-        'joy': '#10B981',
-        'sadness': '#F59E0B',
-        'anger': '#EF4444',
-        'fear': '#8B5CF6',
-        'disgust': '#EC4899',
-        'surprise': '#3B82F6'
-    }
+    # Sort by probability
+    sorted_indices = np.argsort(probabilities)[::-1]
+    emotions = [emotions[i] for i in sorted_indices]
+    probabilities = [probabilities[i] for i in sorted_indices]
     
-    fig = px.bar(
-        emotions_df, 
-        x='Emotion', 
-        y='Score',
-        color='Emotion',
-        color_discrete_map=colors
-    )
+    colors = px.colors.qualitative.Plotly[:len(emotions)]
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        x=emotions,
+        y=probabilities,
+        marker_color=colors,
+        text=[f"{p:.1%}" if isinstance(p, float) else p for p in probabilities],
+        textposition='auto'
+    ))
     
     fig.update_layout(
-        title='Emotion Detection Results',
+        title='Emotion Distribution',
         xaxis_title='Emotion',
-        yaxis_title='Confidence Score',
-        yaxis=dict(range=[0, 1.0]),
-        height=400,
-        template='plotly_white',
-        showlegend=False
+        yaxis_title='Probability' if isinstance(probabilities[0], float) else 'Count',
+        template='plotly_white'
     )
     
     return fig
 
 def create_progress_chart(progress_data):
     """
-    Create a line chart of progress over time
+    Create a progress over time chart
     
     Args:
-        progress_data: Dictionary containing progress metrics
+        progress_data: Dictionary containing progress data
         
     Returns:
         Plotly figure object
     """
-    if not progress_data or 'dates' not in progress_data or not progress_data['dates']:
+    if not progress_data or 'time_series' not in progress_data:
         return None
     
-    # Convert data to DataFrame for easier plotting
-    df = pd.DataFrame({
-        'Date': progress_data['dates'],
-        'Expressiveness': progress_data['expressiveness_scores'],
-        'Pitch Variability': progress_data['pitch_variability'],
-        'Energy Variability': [e * 100 for e in progress_data['energy_variability']],  # Scale for visibility
-    })
+    time_series = progress_data['time_series']
+    
+    if not time_series:
+        return None
+    
+    dates = [entry['date'] for entry in time_series]
+    expressiveness = [entry['expressiveness'] for entry in time_series]
     
     fig = go.Figure()
     
     fig.add_trace(go.Scatter(
-        x=df['Date'],
-        y=df['Expressiveness'],
+        x=dates,
+        y=expressiveness,
         mode='lines+markers',
         name='Expressiveness',
-        line=dict(color='#4F46E5', width=3)
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=df['Date'],
-        y=df['Pitch Variability'],
-        mode='lines+markers',
-        name='Pitch Variability',
-        line=dict(color='#10B981', width=2)
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=df['Date'],
-        y=df['Energy Variability'],
-        mode='lines+markers',
-        name='Energy Variability',
-        line=dict(color='#F59E0B', width=2)
+        line=dict(color='blue', width=2)
     ))
     
     fig.update_layout(
-        title='Progress Over Time',
+        title='Expressiveness Progress Over Time',
         xaxis_title='Date',
-        height=500,
+        yaxis_title='Expressiveness Score (%)',
         template='plotly_white',
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        hovermode='x unified'
+    )
+    
+    return fig
+
+def create_combined_pitch_chart(user_pitch, user_timestamps, benchmark_pitch, benchmark_timestamps):
+    """
+    Create a combined pitch chart comparing user and benchmark recordings
+    
+    Args:
+        user_pitch: List of user's pitch values
+        user_timestamps: List of user's timestamps
+        benchmark_pitch: List of benchmark pitch values
+        benchmark_timestamps: List of benchmark timestamps
+        
+    Returns:
+        Plotly figure object
+    """
+    fig = go.Figure()
+    
+    # Add user pitch trace
+    fig.add_trace(go.Scatter(
+        x=user_timestamps, 
+        y=user_pitch,
+        mode='lines',
+        name='Your Speech',
+        line=dict(color='blue', width=2)
+    ))
+    
+    # Add benchmark pitch trace
+    fig.add_trace(go.Scatter(
+        x=benchmark_timestamps, 
+        y=benchmark_pitch,
+        mode='lines',
+        name='Benchmark Speech',
+        line=dict(color='green', width=2, dash='dash')
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        title='Pitch Comparison',
+        xaxis_title='Time (seconds)',
+        yaxis_title='Pitch (Hz)',
+        legend_title='Recording',
+        template='plotly_white',
+        hovermode='x unified'
+    )
+    
+    return fig
+
+def create_combined_energy_chart(user_energy, user_timestamps, benchmark_energy, benchmark_timestamps):
+    """
+    Create a combined energy chart comparing user and benchmark recordings
+    
+    Args:
+        user_energy: List of user's energy values
+        user_timestamps: List of user's timestamps
+        benchmark_energy: List of benchmark energy values
+        benchmark_timestamps: List of benchmark timestamps
+        
+    Returns:
+        Plotly figure object
+    """
+    fig = go.Figure()
+    
+    # Add user energy trace
+    fig.add_trace(go.Scatter(
+        x=user_timestamps, 
+        y=user_energy,
+        mode='lines',
+        name='Your Speech',
+        line=dict(color='orange', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(255, 165, 0, 0.1)'
+    ))
+    
+    # Add benchmark energy trace
+    fig.add_trace(go.Scatter(
+        x=benchmark_timestamps, 
+        y=benchmark_energy,
+        mode='lines',
+        name='Benchmark Speech',
+        line=dict(color='green', width=2, dash='dash')
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        title='Energy Comparison',
+        xaxis_title='Time (seconds)',
+        yaxis_title='Energy',
+        legend_title='Recording',
+        template='plotly_white',
+        hovermode='x unified'
     )
     
     return fig

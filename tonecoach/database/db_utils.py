@@ -1,24 +1,25 @@
 import sqlite3
 import json
-from datetime import datetime, timedelta
 from pathlib import Path
-from database.models import User, Recording, Exercise
+from datetime import datetime
+import hashlib
 
-DB_PATH = 'tonecoach.db'
+# Database connection
+DATABASE_PATH = Path("database/tonecoach.db")
 
-def get_connection():
-    """Get a connection to the database"""
-    conn = sqlite3.connect(DB_PATH)
+def get_db_connection():
+    """Get a database connection"""
+    conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    """Initialize the database with required tables"""
-    conn = get_connection()
-    c = conn.cursor()
+def create_tables():
+    """Create database tables if they don't exist"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
     # Create users table
-    c.execute('''
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
@@ -30,7 +31,7 @@ def init_db():
     ''')
     
     # Create recordings table
-    c.execute('''
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS recordings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -47,330 +48,532 @@ def init_db():
     )
     ''')
     
-    # Create exercises table
-    c.execute('''
+    # Create exercises table with benchmark_audio field
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS exercises (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         description TEXT,
-        text_content TEXT NOT NULL,
-        difficulty TEXT,
         category TEXT,
-        target_emotion TEXT
+        difficulty TEXT,
+        text_content TEXT NOT NULL,
+        target_emotion TEXT,
+        benchmark_audio_path TEXT,
+        benchmark_metadata TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
-    
-    # Add sample exercises if none exist
-    c.execute("SELECT COUNT(*) FROM exercises")
-    if c.fetchone()[0] == 0:
-        sample_exercises = [
-            (
-                'Introduction Speech',
-                'Practice introducing yourself in a professional setting.',
-                'Hello everyone, my name is [Your Name]. I am excited to be here today to share my thoughts on this important topic. I have been working in this field for several years and have gained valuable insights that Im looking forward to discussing with you.',
-                'Beginner',
-                'Professional',
-                'Confident'
-            ),
-            (
-                'Storytelling Practice',
-                'Practice telling an engaging story with emotional elements.',
-                'It was a dark and stormy night. The rain pounded against the windows as I sat alone in my room. Suddenly, I heard a strange noise coming from outside. With my heart racing, I slowly approached the window and looked out into the darkness.',
-                'Intermediate',
-                'Storytelling',
-                'Suspenseful'
-            ),
-            (
-                'Persuasive Pitch',
-                'Practice delivering a persuasive business pitch.',
-                'Our product solves a critical problem in the market. With our innovative approach, we can reduce costs by 30% while improving efficiency. The opportunity is massive, with a potential market size of $2 billion. Were seeking your investment to scale our operations and capture this untapped potential.',
-                'Advanced',
-                'Business',
-                'Passionate'
-            ),
-            (
-                'Motivational Speech',
-                'Practice delivering an inspirational message.',
-                'Today marks not an end, but a beginning. As you stand at this crossroads, remember that every challenge you have overcome has prepared you for this moment. The path ahead may not be easy, but I believe in your ability to persist, to innovate, and to make a difference. Your unique perspective is exactly what the world needs right now.',
-                'Intermediate',
-                'Motivational',
-                'Inspirational'
-            ),
-            (
-                'Technical Explanation',
-                'Practice explaining a complex concept clearly and concisely.',
-                'Machine learning is a process where computers learn patterns from data without being explicitly programmed. Instead of writing specific instructions, we provide examples and let the algorithm find the underlying patterns. This approach enables systems to improve automatically through experience, similar to how humans learn from observation and feedback.',
-                'Advanced',
-                'Educational',
-                'Informative'
-            ),
-            (
-                'Customer Service Response',
-                'Practice handling a frustrated customer with empathy.',
-                'I understand how frustrating this situation must be for you, and I sincerely apologize for the inconvenience. Your satisfaction is our top priority, and I want to assure you that I will personally work to resolve this issue as quickly as possible. Let me walk you through the steps we will take to address your concerns and make things right.',
-                'Beginner',
-                'Professional',
-                'Empathetic'
-            )
-        ]
-        c.executemany('''
-        INSERT INTO exercises (title, description, text_content, difficulty, category, target_emotion)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ''', sample_exercises)
     
     conn.commit()
     conn.close()
 
-def get_user_by_id(user_id):
-    """Get user data by ID"""
-    conn = get_connection()
-    c = conn.cursor()
+def login_user(username, password):
+    """
+    Attempt to log in a user
     
-    c.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-    user_row = c.fetchone()
+    Args:
+        username: Username
+        password: Password
+        
+    Returns:
+        User ID if successful, None otherwise
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Hash password
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    
+    cursor.execute(
+        "SELECT id FROM users WHERE username = ? AND password_hash = ?",
+        (username, password_hash)
+    )
+    
+    result = cursor.fetchone()
+    user_id = result['id'] if result else None
     
     conn.close()
-    
-    if user_row:
-        return User.from_row(tuple(user_row))
-    return None
-
-def get_user_by_username(username):
-    """Get user data by username"""
-    conn = get_connection()
-    c = conn.cursor()
-    
-    c.execute("SELECT * FROM users WHERE username = ?", (username,))
-    user_row = c.fetchone()
-    
-    conn.close()
-    
-    if user_row:
-        return User.from_row(tuple(user_row))
-    return None
+    return user_id
 
 def create_user(username, email, password_hash):
-    """Create a new user"""
-    conn = get_connection()
-    c = conn.cursor()
+    """
+    Create a new user
+    
+    Args:
+        username: Username
+        email: Email address
+        password_hash: Password hash
+        
+    Returns:
+        User ID if successful, None otherwise
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
     try:
-        c.execute(
+        cursor.execute(
             "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
             (username, email, password_hash)
         )
         conn.commit()
-        user_id = c.lastrowid
-        conn.close()
-        return user_id
+        user_id = cursor.lastrowid
     except sqlite3.IntegrityError:
-        conn.close()
-        return None
+        # Username or email already exists
+        user_id = None
+        conn.rollback()
+    
+    conn.close()
+    return user_id
 
-def update_user(user_id, email=None, password_hash=None):
-    """Update user data"""
-    conn = get_connection()
-    c = conn.cursor()
+def register_user(username, email, password):
+    """
+    Register a new user
+    
+    Args:
+        username: Username
+        email: Email address
+        password: Password
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Hash password
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
     
     try:
-        if email:
-            c.execute("UPDATE users SET email = ? WHERE id = ?", (email, user_id))
-        
-        if password_hash:
-            c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
-        
+        cursor.execute(
+            "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
+            (username, email, password_hash)
+        )
         conn.commit()
-        conn.close()
-        return True
-    except:
+        success = True
+    except sqlite3.IntegrityError:
+        # Username or email already exists
+        success = False
+    
+    conn.close()
+    return success
+
+def update_user(user_id, email=None, password_hash=None, has_voice_model=None):
+    """
+    Update user data
+    
+    Args:
+        user_id: User ID
+        email: New email address (optional)
+        password_hash: New password hash (optional)
+        has_voice_model: Voice model status (optional)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    updates = []
+    params = []
+    
+    if email:
+        updates.append("email = ?")
+        params.append(email)
+    
+    if password_hash:
+        # Hash the password if it's a plain text password
+        if len(password_hash) != 64:  # SHA-256 hash is 64 characters long
+            password_hash = hashlib.sha256(password_hash.encode()).hexdigest()
+        updates.append("password_hash = ?")
+        params.append(password_hash)
+    
+    if has_voice_model is not None:
+        updates.append("has_voice_model = ?")
+        params.append(1 if has_voice_model else 0)
+    
+    if not updates:
         conn.close()
         return False
-
-def update_voice_model_status(user_id, has_model):
-    """Update user's voice model status"""
-    conn = get_connection()
-    c = conn.cursor()
     
     try:
-        c.execute("UPDATE users SET has_voice_model = ? WHERE id = ?", (1 if has_model else 0, user_id))
+        cursor.execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
+            params + [user_id]
+        )
         conn.commit()
-        conn.close()
-        return True
-    except:
-        conn.close()
-        return False
+        success = cursor.rowcount > 0
+    except sqlite3.Error:
+        success = False
+    
+    conn.close()
+    return success
+
+def update_voice_model_status(user_id, has_voice_model):
+    """
+    Update user's voice model status
+    
+    Args:
+        user_id: User ID
+        has_voice_model: Whether the user has a voice model
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    return update_user(user_id, has_voice_model=has_voice_model)
+
+def get_user_by_username(username):
+    """
+    Get user data by username
+    
+    Args:
+        username: Username
+        
+    Returns:
+        User data or None if not found
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "SELECT * FROM users WHERE username = ?",
+        (username,)
+    )
+    
+    result = cursor.fetchone()
+    
+    conn.close()
+    return result
+
+def get_user_by_email(email):
+    """
+    Get user data by email
+    
+    Args:
+        email: Email address
+        
+    Returns:
+        User data or None if not found
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "SELECT * FROM users WHERE email = ?",
+        (email,)
+    )
+    
+    result = cursor.fetchone()
+    
+    conn.close()
+    return result
+
+def get_user_by_id(user_id):
+    """
+    Get user data by ID
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        User data or None if not found
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "SELECT * FROM users WHERE id = ?",
+        (user_id,)
+    )
+    
+    result = cursor.fetchone()
+    
+    conn.close()
+    return result
 
 def save_recording(user_id, filename, analysis_results, feedback):
-    """Save recording analysis to database"""
-    conn = get_connection()
-    c = conn.cursor()
+    """
+    Save recording data to database
+    
+    Args:
+        user_id: User ID
+        filename: Audio filename
+        analysis_results: Dictionary containing analysis results
+        feedback: Dictionary containing feedback
+        
+    Returns:
+        Recording ID if successful, None otherwise
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
     try:
-        c.execute('''
-        INSERT INTO recordings (
-            user_id, filename, text_content, expressiveness_score, 
-            pitch_variability, energy_variability, speech_rate, 
-            emotional_tone, feedback
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            user_id, 
-            filename, 
-            analysis_results.get('transcription', ''),
-            analysis_results.get('expressiveness_score', 0.0),
-            analysis_results.get('pitch_variability', 0.0),
-            analysis_results.get('energy_variability', 0.0),
-            analysis_results.get('speech_rate', 0.0),
-            analysis_results.get('primary_emotion', 'neutral'),
-            json.dumps(feedback)
-        ))
-        
+        cursor.execute(
+            """
+            INSERT INTO recordings (
+                user_id, filename, text_content, expressiveness_score,
+                pitch_variability, energy_variability, speech_rate,
+                emotional_tone, feedback
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                filename,
+                analysis_results.get('transcription', ''),
+                analysis_results.get('expressiveness_score', 0),
+                analysis_results.get('pitch_variability', 0),
+                analysis_results.get('energy_variability', 0),
+                analysis_results.get('speech_rate', 0),
+                analysis_results.get('primary_emotion', 'neutral'),
+                json.dumps(feedback)
+            )
+        )
         conn.commit()
-        recording_id = c.lastrowid
-        conn.close()
-        return recording_id
-    except Exception as e:
-        print(f"Error saving recording: {e}")
-        conn.close()
-        return None
-
-def get_user_recordings(user_id, limit=10):
-    """Get user's recordings from database"""
-    conn = get_connection()
-    c = conn.cursor()
-    
-    c.execute('''
-    SELECT * FROM recordings 
-    WHERE user_id = ? 
-    ORDER BY created_at DESC
-    LIMIT ?
-    ''', (user_id, limit))
-    
-    rows = c.fetchall()
-    recordings = []
-    
-    for row in rows:
-        recordings.append(Recording.from_row(tuple(row)).to_dict())
+        recording_id = cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
+        recording_id = None
     
     conn.close()
-    return recordings
+    return recording_id
 
-def get_recording(recording_id, user_id):
-    """Get a specific recording"""
-    conn = get_connection()
-    c = conn.cursor()
+def get_recording(recording_id, user_id=None):
+    """
+    Get recording data by ID
     
-    c.execute('''
-    SELECT * FROM recordings 
-    WHERE id = ? AND user_id = ?
-    ''', (recording_id, user_id))
+    Args:
+        recording_id: Recording ID
+        user_id: User ID (optional, for validation)
+        
+    Returns:
+        Recording data or None if not found
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    row = c.fetchone()
+    if user_id:
+        cursor.execute(
+            "SELECT * FROM recordings WHERE id = ? AND user_id = ?",
+            (recording_id, user_id)
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM recordings WHERE id = ?",
+            (recording_id,)
+        )
+    
+    result = cursor.fetchone()
+    
     conn.close()
-    
-    if row:
-        return Recording.from_row(tuple(row)).to_dict()
-    return None
+    return dict(result) if result else None
 
-def get_user_progress(user_id, days=30):
-    """Get user progress data for the dashboard"""
-    conn = get_connection()
-    c = conn.cursor()
+def get_user_recordings(user_id, limit=None, offset=0):
+    """
+    Get recordings for a user
     
-    # Get date range
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=days)
+    Args:
+        user_id: User ID
+        limit: Maximum number of recordings to return (optional)
+        offset: Offset for pagination (optional)
+        
+    Returns:
+        List of recording data
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    # Convert dates to strings for SQLite
-    start_date_str = start_date.strftime('%Y-%m-%d')
-    end_date_str = end_date.strftime('%Y-%m-%d')
+    if limit:
+        cursor.execute(
+            "SELECT * FROM recordings WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (user_id, limit, offset)
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM recordings WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
+        )
     
-    # Get recordings in date range
-    c.execute('''
-    SELECT created_at, expressiveness_score, pitch_variability, 
-           energy_variability, speech_rate, emotional_tone
-    FROM recordings
-    WHERE user_id = ? AND created_at BETWEEN ? AND ?
-    ORDER BY created_at
-    ''', (user_id, start_date_str, end_date_str))
+    results = cursor.fetchall()
     
-    results = c.fetchall()
     conn.close()
-    
-    if not results:
-        return None
-    
-    # Extract data for progress charts
-    dates = [row[0] for row in results]
-    expressiveness_scores = [row[1] for row in results]
-    pitch_variability = [row[2] for row in results]
-    energy_variability = [row[3] for row in results]
-    speech_rate = [row[4] for row in results]
-    emotions = [row[5] for row in results]
-    
-    # Calculate improvements if we have at least 2 recordings
-    improvements = {}
-    if len(expressiveness_scores) >= 2:
-        improvements['expressiveness'] = expressiveness_scores[-1] - expressiveness_scores[0]
-        improvements['pitch_variability'] = pitch_variability[-1] - pitch_variability[0]
-        improvements['energy_variability'] = energy_variability[-1] - energy_variability[0]
-        improvements['speech_rate'] = speech_rate[-1] - speech_rate[0]
-    
-    # Count emotions
-    emotion_counts = {}
-    for emotion in emotions:
-        if emotion in emotion_counts:
-            emotion_counts[emotion] += 1
-        else:
-            emotion_counts[emotion] = 1
-    
-    # Calculate average scores
-    avg_expressiveness = sum(expressiveness_scores) / len(expressiveness_scores) if expressiveness_scores else 0
-    avg_pitch_var = sum(pitch_variability) / len(pitch_variability) if pitch_variability else 0
-    avg_energy_var = sum(energy_variability) / len(energy_variability) if energy_variability else 0
-    avg_speech_rate = sum(speech_rate) / len(speech_rate) if speech_rate else 0
-    
-    return {
-        'dates': dates,
-        'expressiveness_scores': expressiveness_scores,
-        'pitch_variability': pitch_variability,
-        'energy_variability': energy_variability,
-        'speech_rate': speech_rate,
-        'improvements': improvements,
-        'emotion_distribution': emotion_counts,
-        'average_scores': {
-            'expressiveness': avg_expressiveness,
-            'pitch_variability': avg_pitch_var,
-            'energy_variability': avg_energy_var,
-            'speech_rate': avg_speech_rate
-        },
-        'recording_count': len(results)
-    }
+    return [dict(row) for row in results]
 
 def get_all_exercises():
-    """Get all exercises"""
-    conn = get_connection()
-    c = conn.cursor()
+    """
+    Get all exercises
     
-    c.execute('SELECT * FROM exercises')
-    rows = c.fetchall()
+    Returns:
+        List of exercise data
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    exercises = []
-    for row in rows:
-        exercises.append(Exercise.from_row(tuple(row)).to_dict())
+    cursor.execute("SELECT * FROM exercises ORDER BY category, difficulty")
+    
+    results = cursor.fetchall()
     
     conn.close()
-    return exercises
+    return [dict(row) for row in results]
 
 def get_exercise(exercise_id):
-    """Get a specific exercise"""
-    conn = get_connection()
-    c = conn.cursor()
+    """
+    Get exercise data by ID
     
-    c.execute('SELECT * FROM exercises WHERE id = ?', (exercise_id,))
-    row = c.fetchone()
+    Args:
+        exercise_id: Exercise ID
+        
+    Returns:
+        Exercise data or None if not found
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "SELECT * FROM exercises WHERE id = ?",
+        (exercise_id,)
+    )
+    
+    result = cursor.fetchone()
+    
+    conn.close()
+    return dict(result) if result else None
+
+def save_benchmark_audio(exercise_id, audio_path, metadata=None):
+    """
+    Save benchmark audio data for an exercise
+    
+    Args:
+        exercise_id: Exercise ID
+        audio_path: Path to benchmark audio file
+        metadata: Dictionary containing metadata about the benchmark recording
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(
+            """
+            UPDATE exercises SET
+                benchmark_audio_path = ?,
+                benchmark_metadata = ?
+            WHERE id = ?
+            """,
+            (
+                str(audio_path),
+                json.dumps(metadata) if metadata else None,
+                exercise_id
+            )
+        )
+        conn.commit()
+        success = cursor.rowcount > 0
+    except sqlite3.Error:
+        success = False
+    
+    conn.close()
+    return success
+
+def get_user_progress(user_id):
+    """
+    Get progress data for a user
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Dictionary containing progress data
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Get recordings for the user
+    cursor.execute(
+        """
+        SELECT 
+            expressiveness_score, pitch_variability, energy_variability, 
+            speech_rate, emotional_tone, created_at
+        FROM recordings 
+        WHERE user_id = ? 
+        ORDER BY created_at
+        """,
+        (user_id,)
+    )
+    
+    recordings = cursor.fetchall()
     
     conn.close()
     
-    if row:
-        return Exercise.from_row(tuple(row)).to_dict()
-    return None
+    if not recordings:
+        return None
+    
+    # Calculate averages
+    total_expressiveness = 0
+    total_pitch_variability = 0
+    total_energy_variability = 0
+    total_speech_rate = 0
+    emotion_counts = {}
+    
+    for recording in recordings:
+        total_expressiveness += recording['expressiveness_score']
+        total_pitch_variability += recording['pitch_variability']
+        total_energy_variability += recording['energy_variability']
+        total_speech_rate += recording['speech_rate']
+        
+        emotion = recording['emotional_tone']
+        if emotion:
+            emotion_counts[emotion] = emotion_counts.get(emotion, 0) + 1
+    
+    recording_count = len(recordings)
+    
+    # Calculate improvements (compare last 3 to previous 3)
+    improvements = {}
+    
+    if recording_count >= 6:
+        recent_recordings = recordings[-3:]
+        previous_recordings = recordings[-6:-3]
+        
+        recent_expressiveness = sum(r['expressiveness_score'] for r in recent_recordings) / 3
+        previous_expressiveness = sum(r['expressiveness_score'] for r in previous_recordings) / 3
+        improvements['expressiveness'] = recent_expressiveness - previous_expressiveness
+        
+        recent_pitch = sum(r['pitch_variability'] for r in recent_recordings) / 3
+        previous_pitch = sum(r['pitch_variability'] for r in previous_recordings) / 3
+        improvements['pitch_variability'] = recent_pitch - previous_pitch
+        
+        recent_energy = sum(r['energy_variability'] for r in recent_recordings) / 3
+        previous_energy = sum(r['energy_variability'] for r in previous_recordings) / 3
+        improvements['energy_variability'] = recent_energy - previous_energy
+        
+        recent_rate = sum(r['speech_rate'] for r in recent_recordings) / 3
+        previous_rate = sum(r['speech_rate'] for r in previous_recordings) / 3
+        improvements['speech_rate'] = recent_rate - previous_rate
+    
+    # Prepare time series data for charting
+    time_series = []
+    for recording in recordings:
+        created_at = datetime.strptime(recording['created_at'], '%Y-%m-%d %H:%M:%S')
+        time_series.append({
+            'date': created_at.strftime('%Y-%m-%d'),
+            'expressiveness': recording['expressiveness_score'],
+            'pitch_variability': recording['pitch_variability'],
+            'energy_variability': recording['energy_variability'],
+            'speech_rate': recording['speech_rate']
+        })
+    
+    # Return progress data
+    return {
+        'recording_count': recording_count,
+        'average_scores': {
+            'expressiveness': total_expressiveness / recording_count,
+            'pitch_variability': total_pitch_variability / recording_count,
+            'energy_variability': total_energy_variability / recording_count,
+            'speech_rate': total_speech_rate / recording_count
+        },
+        'improvements': improvements,
+        'emotion_distribution': emotion_counts,
+        'time_series': time_series
+    }
+
+# Create tables when the module is imported
+create_tables()

@@ -4,12 +4,9 @@ import streamlit as st
 st.set_page_config(page_title="ToneCoach Admin - Benchmark Manager", layout="wide")
 
 import sqlite3
-import os
 import json
 import shutil
 from pathlib import Path
-from io import BytesIO
-import numpy as np
 
 # Import SpeechAnalyzer for audio processing
 from analysis.speech_analyzer import SpeechAnalyzer

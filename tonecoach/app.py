@@ -7,7 +7,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
+from utils.voice_cloning import integrate_voice_cloning
 import time
 from pathlib import Path
 
@@ -132,6 +132,12 @@ def main():
     # Display sidebar if user is logged in
     if st.session_state.user_id:
         sidebar()
+        
+    # Integrate voice cloning with proper error handling
+    try:
+        integrate_voice_cloning()
+    except Exception as e:
+        st.error(f"Voice cloning feature is currently unavailable: {str(e)}")
     
     # Display the appropriate page
     if st.session_state.page == 'login':
